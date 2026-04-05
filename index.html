@@ -16,32 +16,23 @@
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #F5F0E8; font-family: 'IBM Plex Mono', monospace; }
     input, button { font-family: 'IBM Plex Mono', monospace; }
-    input[type=number]::-webkit-inner-spin-button,
-    input[type=number]::-webkit-outer-spin-button { opacity: 1; }
   </style>
 </head>
 <body>
   <div id="root"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script>
-    // localStorage-based storage (persists on iPhone Safari)
+    // localStorage storage API
     window.storage = {
       get: function(key) {
         return new Promise(function(resolve) {
-          try {
-            var val = localStorage.getItem(key);
-            resolve(val ? { key: key, value: val } : null);
-          } catch(e) { resolve(null); }
+          try { var val = localStorage.getItem(key); resolve(val ? { key: key, value: val } : null); }
+          catch(e) { resolve(null); }
         });
       },
       set: function(key, value) {
         return new Promise(function(resolve) {
-          try {
-            localStorage.setItem(key, value);
-            resolve({ key: key, value: value });
-          } catch(e) { resolve(null); }
+          try { localStorage.setItem(key, value); resolve({ key: key, value: value }); }
+          catch(e) { resolve(null); }
         });
       },
       delete: function(key) {
@@ -51,7 +42,62 @@
         });
       }
     };
+
+    // Audio — initialised on first user gesture, works in iOS PWA
+    var _audioCtx = null;
+    function _getAudioCtx() {
+      if (!_audioCtx) {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (_audioCtx.state === 'suspended') {
+        _audioCtx.resume();
+      }
+      return _audioCtx;
+    }
+
+    window._playTick = function() {
+      try {
+        var ctx = _getAudioCtx();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.5, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.12);
+      } catch(e) { console.log('tick error', e); }
+    };
+
+    window._playBell = function() {
+      try {
+        var ctx = _getAudioCtx();
+        var freqs = [523, 659, 784];
+        var gain = ctx.createGain();
+        gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0.6, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.5);
+        freqs.forEach(function(freq, i) {
+          var osc = ctx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.18);
+          osc.connect(gain);
+          osc.start(ctx.currentTime + i * 0.18);
+          osc.stop(ctx.currentTime + i * 0.18 + 2.5);
+        });
+      } catch(e) { console.log('bell error', e); }
+    };
+
+    // Unlock AudioContext on first touch (iOS requirement)
+    document.addEventListener('touchstart', function unlock() {
+      _getAudioCtx();
+      document.removeEventListener('touchstart', unlock);
+    }, { once: true });
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 const C = {
@@ -804,53 +850,15 @@ function GymSession({ session, onClose, data, update, curDate }) {
     try { if(navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
   }
 
-  const audioCtxRef = useRef(null);
-
-  function getCtx() {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtxRef.current.state === "suspended") {
-        audioCtxRef.current.resume();
-      }
-      return audioCtxRef.current;
-    } catch(e) { return null; }
-  }
-
   function playTick() {
-    const ctx = getCtx(); if(!ctx) return;
-    try {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.15);
-    } catch(e) {}
+    try { window._playTick && window._playTick(); } catch(e) {}
   }
 
   function playBell() {
-    const ctx = getCtx(); if(!ctx) return;
-    try {
-      const gain = ctx.createGain();
-      gain.connect(ctx.destination);
-      gain.gain.setValueAtTime(0.7, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2);
-      [523, 659, 784].forEach(function(freq, i) {
-        const osc = ctx.createOscillator();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.15);
-        osc.connect(gain);
-        osc.start(ctx.currentTime + i * 0.15);
-        osc.stop(ctx.currentTime + i * 0.15 + 2);
-      });
-    } catch(e) {}
+    try { window._playBell && window._playBell(); } catch(e) {}
   }
 
-  function startT(ei){ getCtx(); vibrate(50); clearInterval(ivs.current[ei]); setExs(p=>p.map((e,i)=>i===ei?{...e,timerActive:true,timerLeft:e.restTimer}:e)); ivs.current[ei]=setInterval(()=>setExs(p=>{ const e=p[ei]; if(!e||!e.timerActive){clearInterval(ivs.current[ei]);return p;} const n=e.timerLeft-1; if(n<=0){clearInterval(ivs.current[ei]);playBell();vibrate([200,100,200,100,400]);return p.map((x,i)=>i===ei?{...x,timerActive:false,timerLeft:0}:x);} return p.map((x,i)=>i===ei?{...x,timerLeft:n}:x); }),1000); }
+  function startT(ei){ playTick(); vibrate(50); clearInterval(ivs.current[ei]); setExs(p=>p.map((e,i)=>i===ei?{...e,timerActive:true,timerLeft:e.restTimer}:e)); ivs.current[ei]=setInterval(()=>setExs(p=>{ const e=p[ei]; if(!e||!e.timerActive){clearInterval(ivs.current[ei]);return p;} const n=e.timerLeft-1; if(n<=0){clearInterval(ivs.current[ei]);playBell();vibrate([200,100,200,100,400]);return p.map((x,i)=>i===ei?{...x,timerActive:false,timerLeft:0}:x);} return p.map((x,i)=>i===ei?{...x,timerLeft:n}:x); }),1000); }
   function stopT(ei){ clearInterval(ivs.current[ei]); setExs(p=>p.map((e,i)=>i===ei?{...e,timerActive:false,timerLeft:0}:e)); }
   function chRT(ei,d){ setExs(p=>p.map((e,i)=>i===ei?{...e,restTimer:Math.max(30,e.restTimer+d)}:e)); }
 
