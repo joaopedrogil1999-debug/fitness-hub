@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="Fitness Hub"/>
+  <meta name="theme-color" content="#F5F0E8"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon.png"/>
+  <title>Fitness Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #F5F0E8; font-family: 'IBM Plex Mono', monospace; }
+    input, button { font-family: 'IBM Plex Mono', monospace; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script>
+    // localStorage-based storage (persists on iPhone Safari)
+    window.storage = {
+      get: function(key) {
+        return new Promise(function(resolve) {
+          try {
+            var val = localStorage.getItem(key);
+            resolve(val ? { key: key, value: val } : null);
+          } catch(e) { resolve(null); }
+        });
+      },
+      set: function(key, value) {
+        return new Promise(function(resolve) {
+          try {
+            localStorage.setItem(key, value);
+            resolve({ key: key, value: value });
+          } catch(e) { resolve(null); }
+        });
+      },
+      delete: function(key) {
+        return new Promise(function(resolve) {
+          try { localStorage.removeItem(key); resolve({ key: key, deleted: true }); }
+          catch(e) { resolve(null); }
+        });
+      }
+    };
+  </script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+const C = {
+  bg:"#F5F0E8", card:"#FFFFFF", border:"#E8E0D0", text:"#1A1A1A", muted:"#8A8070",
+  blue:"#2563EB", green:"#16A34A", red:"#DC2626", orange:"#EA580C", yellow:"#CA8A04",
+};
+
+const EXERCISE_LIBRARY = {
+  "Chest": ["Bench Press","Incline Bench Press","Decline Bench Press","Dumbbell Bench Press","Incline Dumbbell Press","Dumbbell Flyes","Cable Flyes","Pec Dec","Push-Ups","Chest Dips","Cable Crossover","Landmine Press","Chest Press"],
+  "Back": ["Pull Ups","Chin Ups","Lat Pulldowns","Seated Cable Row","Bent Over Row","T-Bar Row","Chest Supported Row","Single Arm Dumbbell Row","Face Pulls","Facepulls","Straight Arm Pulldown","Deadlift","Rack Pull","Chest Supported T-Bar Row","Meadows Row"],
+  "Shoulders": ["Overhead Press","Seated Dumbbell Press","Arnold Press","Lateral Raises","Cable Lateral Raises","Machine Lateral Raises","Front Raises","Rear Delt Flyes","Reverse Cable Fly","Upright Row","Shrugs","Machine Shoulder Press"],
+  "Biceps": ["Barbell Curl","Dumbbell Curl","Hammer Curl","Preacher Curls","Incline Bench Curl","Cable Curl","EZ Bar Curl","Concentration Curl","Spider Curl","Machine Curl"],
+  "Triceps": ["Tricep Pushdown","Overhead Tricep Extension","Skull Crushers","Close Grip Bench Press","Dips","Cable Overhead Extension","Tricep Kickback","Machine Tricep Extension"],
+  "Legs": ["Squat","Hack Squat","Leg Press","Romanian Deadlift","RDL","Bulgarian Split Squats","Lunges","Leg Extensions","Seated Leg Curls","Leg Curls","Calf Raises","Hip Thrust","Glute Bridge","Step Ups","Sumo Squat","Goblet Squat"],
+  "Core": ["Plank","Crunches","Leg Raises","Ab Wheel","Cable Crunch","ABS Machine","Hanging Leg Raise","Russian Twist","Side Plank","Mountain Climbers","Abs"],
+  "Cardio": ["Treadmill","Rowing Machine","Stationary Bike","Elliptical","Jump Rope","Stair Climber"],
+};
+
+const DEFAULT_PHASES = [
+  { id:1, type:"maintenance", label:"MAINTENANCE", start:"2026-03-29", end:"2026-04-11", color:"#16A34A" },
+  { id:2, type:"cut", label:"CUT", start:"2026-04-12", end:"2026-06-25", color:"#DC2626" },
+];
+
+const WORKOUTS = {
+  Pull:  { day:"Mon", color:C.blue,   exercises:["Chest Supported Row","Lat Pulldowns","Reverse Cable Fly","Preacher Curls","Leg Raises"] },
+  Push:  { day:"Wed", color:C.red,    exercises:["Incline Dumbbell Press","Pec Dec","Cable Lateral Raises","Tricep Pushdown","ABS Machine"] },
+  Upper: { day:"Fri", color:C.green,  exercises:["Incline Bench Press","Pull Ups","Machine Lateral Raises","Chest Press","Chest Supported T-Bar Row","Incline Bench Curl","Overhead Tricep Extension","Facepulls"] },
+  Lower: { day:"Sat", color:C.yellow, exercises:["Hack Squat","RDL","Bulgarian Split Squats","Seated Leg Curls","Leg Extensions","Abs"] },
+};
+
+const EMPTY = () => ({ weights:{}, gymLogs:{}, cardioLogs:{}, lifts:{}, phases:DEFAULT_PHASES, customWorkouts:{}, workoutTemplates:{} });
+const SK = "pf_v8";
+
+function migrate(d) {
+  if (!d || typeof d !== "object") return EMPTY();
+  if (!d.weights)          d.weights = {};
+  if (!d.gymLogs)          d.gymLogs = {};
+  if (!d.cardioLogs)       d.cardioLogs = {};
+  if (!d.lifts)            d.lifts = {};
+  if (!d.customWorkouts)   d.customWorkouts = {};
+  if (!d.workoutTemplates) d.workoutTemplates = {};
+  if (!d.phases || !d.phases.length) d.phases = DEFAULT_PHASES;
+  d.phases = d.phases.map(p => ({ ...p, label: p.label === "MANUTENÇÃO" ? "MAINTENANCE" : p.label }));
+
+  const needsMigration = Object.values(d.lifts).some(recs =>
+    Array.isArray(recs) && recs.length > 0 && recs[0].orm == null
+  );
+  if (needsMigration) d.lifts = recalcLifts(d);
+  return d;
+}
+
+function epley(kg, reps) {
+  if (!reps || reps <= 0) return 0;
+  if (reps === 1) return kg;
+  return Math.round(kg * (1 + reps / 30) * 10) / 10;
+}
+
+function recalcLifts(data) {
+  const lifts = {};
+  const allLogs = [];
+  Object.entries(data.gymLogs || {}).forEach(([date, logs]) => {
+    const arr = Array.isArray(logs) ? logs : (logs ? [logs] : []);
+    arr.forEach(log => allLogs.push({ date, log }));
+  });
+  allLogs.sort((a, b) => a.date.localeCompare(b.date));
+  allLogs.forEach(({ date, log }) => {
+    (log.exercises || []).forEach(ex => {
+      const firstWorking = (ex.sets || []).find(s => !s.isWarmup);
+      const orm = firstWorking ? epley(firstWorking.kg || 0, firstWorking.reps || 0) : 0;
+      const volume = (ex.sets || []).reduce(function(sum, s) {
+        return sum + (s.kg || 0) * (s.reps || 0);
+      }, 0);
+      if (!orm && !volume) return;
+      if (!lifts[ex.name]) lifts[ex.name] = [];
+      const logId = log.id || (date + log.workout);
+      lifts[ex.name] = lifts[ex.name].filter(r => r.logId !== logId);
+      lifts[ex.name].push({ date, kg: firstWorking ? firstWorking.kg : 0, reps: firstWorking ? firstWorking.reps : 0, orm, volume, logId });
+    });
+  });
+  return lifts;
+}
+
+function storageSave(d) {
+  const str = JSON.stringify(d);
+  window.storage.set(SK, str).catch(function() {});
+  try { sessionStorage.setItem(SK, str); } catch(e) {}
+}
+
+function storageLoad() {
+  return window.storage.get(SK).then(function(r) {
+    if (r && r.value) return migrate(JSON.parse(r.value));
+    try {
+      const raw = sessionStorage.getItem(SK);
+      if (raw) return migrate(JSON.parse(raw));
+    } catch(e2) {}
+    return null;
+  }).catch(function() {
+    try {
+      const raw = sessionStorage.getItem(SK);
+      if (raw) return migrate(JSON.parse(raw));
+    } catch(e2) {}
+    return null;
+  });
+}
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
+}
+function toStr(d) {
+  return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
+}
+function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+function parseDate(s) { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); }
+function fmtDate(s) { return parseDate(s).toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"2-digit" }); }
+
+const pBtn = { padding:"10px 16px", background:C.text, color:"#fff", border:"none", borderRadius:6, fontFamily:"inherit", fontSize:10, letterSpacing:1.5, cursor:"pointer", fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" };
+const gBtn = { padding:"9px 14px", background:"none", color:C.muted, border:`1px solid ${C.border}`, borderRadius:6, fontFamily:"inherit", fontSize:10, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" };
+const iSt  = { padding:"9px 12px", fontSize:13, fontFamily:"inherit", border:`1px solid ${C.border}`, borderRadius:6, background:C.bg, width:"100%", boxSizing:"border-box" };
+const mSt  = { padding:"6px", fontSize:12, fontFamily:"inherit", border:`1px solid ${C.border}`, borderRadius:4, background:C.bg, width:"100%", boxSizing:"border-box", textAlign:"center" };
+
+function Card({ label, children }) {
+  return (
+    <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:14, marginBottom:12 }}>
+      {label && <div style={{ fontSize:9, color:C.muted, letterSpacing:2, marginBottom:10 }}>{label}</div>}
+      {children}
+    </div>
+  );
+}
+function NavArrow({ dir, onClick }) {
+  return (<div onClick={onClick} style={{ width:32, height:32, border:`1px solid ${C.border}`, borderRadius:6, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:18, color:C.muted, userSelect:"none" }}>{dir==="left"?"‹":"›"}</div>);
+}
+function Dot({ color }) {
+  return (<span style={{ display:"inline-block", width:7, height:7, borderRadius:"50%", background:color, flexShrink:0 }} />);
+}
+function TimeBox({ label, minutes, color, extra }) {
+  const h=Math.floor(minutes/60), m=minutes%60;
+  return (
+    <div style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+      <div style={{ fontSize:8, color, letterSpacing:1.5, marginBottom:4, fontWeight:700 }}>{label}</div>
+      <div style={{ fontSize:14, fontWeight:700 }}>{minutes===0?"—":h>0?h+"h "+m+"m":m+"m"}</div>
+      {extra && <div style={{ fontSize:8, color:C.muted, marginTop:2 }}>{extra}</div>}
+    </div>
+  );
+}
+function WChart({ days, weights, height=60 }) {
+  const wd = days.filter(d => weights[toStr(d)] != null);
+  if (wd.length < 2) return null;
+  const vals = wd.map(d => weights[toStr(d)]);
+  const mn=Math.min(...vals)-0.5, mx=Math.max(...vals)+0.5;
+  const W=300, H=height;
+  const px=i=>(i/(wd.length-1))*W, py=v=>H-((v-mn)/(mx-mn))*H;
+  const path=wd.map((d,i)=>(i===0?"M":"L")+px(i)+","+py(weights[toStr(d)])).join(" ");
+  return (
+    <svg viewBox={"0 0 "+W+" "+H} style={{ width:"100%", height:H }} preserveAspectRatio="none">
+      <path d={path} fill="none" stroke={C.blue} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function App() {
+  const [data, setData]       = useState(EMPTY);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab]         = useState("log");
+  const [curDate, setCurDate] = useState(todayStr);
+  const dataRef = useRef(EMPTY());
+
+  useEffect(() => {
+    let live = true;
+    const t = setTimeout(() => { if (live) setLoading(false); }, 5000);
+    storageLoad().then(d => {
+      clearTimeout(t);
+      if (live) { if (d) { dataRef.current = d; setData(d); } setLoading(false); }
+    }).catch(() => { clearTimeout(t); if (live) setLoading(false); });
+    return () => { live = false; clearTimeout(t); };
+  }, []);
+
+  useEffect(() => {
+    const flush = () => storageSave(dataRef.current);
+    document.addEventListener("visibilitychange", flush);
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("blur", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", flush);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("blur", flush);
+    };
+  }, []);
+
+  function update(fn) {
+    setData(prev => {
+      const next = fn(prev);
+      dataRef.current = next;
+      storageSave(next);
+      return next;
+    });
+  }
+
+  if (loading) {
+    return (
+      <div style={{ fontFamily:"'IBM Plex Mono',monospace", background:C.bg, minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ color:C.muted, fontSize:11, letterSpacing:2 }}>LOADING…</div>
+      </div>
+    );
+  }
+
+  const phases   = data.phases?.length ? data.phases : DEFAULT_PHASES;
+  const nowStr   = todayStr();
+  const curPhase = phases.find(p => nowStr >= p.start && nowStr <= p.end) || phases[phases.length-1];
+  const phDays   = Math.max(1, (parseDate(curPhase.end) - parseDate(curPhase.start)) / 86400000);
+  const phEl     = Math.max(0, Math.min(phDays, (parseDate(nowStr) - parseDate(curPhase.start)) / 86400000));
+  const pct      = (phEl / phDays) * 100;
+
+  const TABS = [
+    {id:"log",label:"LOG"}, {id:"gym",label:"GYM"}, {id:"cardio",label:"CARDIO"},
+    {id:"lifts",label:"LIFTS"}, {id:"season",label:"PLAN"}, {id:"overview",label:"OVERVIEW"},
+  ];
+
+  return (
+    <div style={{ fontFamily:"'IBM Plex Mono',monospace", background:C.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto" }}>
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <div style={{ fontSize:9, color:C.muted }}>{fmtDate(curPhase.start)} → {fmtDate(curPhase.end)}</div>
+          <div style={{ fontSize:9, fontWeight:700, border:`1px solid ${curPhase.color}`, color:curPhase.color, padding:"3px 8px", borderRadius:4 }}>{curPhase.label}</div>
+        </div>
+        <div style={{ height:4, background:C.border, borderRadius:2, overflow:"hidden" }}>
+          <div style={{ height:4, width:pct+"%", background:curPhase.color, borderRadius:2 }}/>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", borderBottom:`1px solid ${C.border}`, marginTop:10 }}>
+        {TABS.map(t => (
+          <div key={t.id} onClick={() => setTab(t.id)} style={{ flex:1, padding:"10px 4px", fontSize:9, letterSpacing:1, fontWeight:tab===t.id?700:400, color:tab===t.id?C.text:C.muted, borderBottom:tab===t.id?"2px solid "+C.text:"2px solid transparent", cursor:"pointer", whiteSpace:"nowrap", userSelect:"none", textAlign:"center" }}>
+            {t.label}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding:"16px 16px 80px" }}>
+        {tab==="log"      && <TabLog      data={data} update={update}/>}
+        {tab==="gym"      && <TabGym      data={data} update={update} curDate={curDate} setCurDate={setCurDate}/>}
+        {tab==="cardio"   && <TabCardio   data={data} update={update}/>}
+        {tab==="lifts"    && <TabLifts    data={data}/>}
+        {tab==="season"   && <TabSeason   data={data} update={update}/>}
+        {tab==="overview" && <TabOverview data={data}/>}
+      </div>
+    </div>
+  );
+}
+
+function TabLog({ data, update }) {
+  const [wVal, setWVal]     = useState("");
+  const [selDate, setSelDate] = useState(todayStr);
+  const [period, setPeriod]  = useState("S");
+  const entries = Object.entries(data.weights).sort((a,b) => b[0].localeCompare(a[0]));
+  const lastW   = entries.length ? entries[0][1] : null;
+
+  function save() {
+    const v = parseFloat(wVal || lastW);
+    if (!v || v < 40 || v > 200) return;
+    update(p => ({ ...p, weights: { ...p.weights, [selDate]: v } }));
+    setWVal("");
+  }
+
+  return (
+    <div>
+      <Card label="LOG WEIGHT">
+        <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)} style={{ ...iSt, width:"auto", marginBottom:10 }}/>
+        <div style={{ display:"flex", gap:8 }}>
+          <input value={wVal} onChange={e => setWVal(e.target.value)} placeholder={lastW ? String(lastW) : "85.0"} type="number"
+            style={{ flex:1, padding:"10px 12px", fontSize:16, fontFamily:"inherit", border:`1px solid ${C.border}`, borderRadius:4, background:C.bg }}/>
+          <div onClick={save} style={pBtn}>SAVE</div>
+        </div>
+      </Card>
+      <WeightChartCard weights={data.weights} period={period} setPeriod={setPeriod}/>
+      <Card label="WEIGHT HISTORY">
+        {entries.length === 0 ? <p style={{ color:C.muted, fontSize:11 }}>No records</p> : null}
+        {entries.slice(0,7).map(([d,w]) => <WeightRow key={d} date={d} weight={w} update={update}/>)}
+      </Card>
+    </div>
+  );
+}
+
+function WeightRow({ date, weight, update }) {
+  const [menu, setMenu] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [val,  setVal]  = useState(String(weight));
+  function save() { const v=parseFloat(val); if(!v) return; update(p=>({...p,weights:{...p.weights,[date]:v}})); setEdit(false); }
+  function del()  { update(p=>{const w={...p.weights};delete w[date];return{...p,weights:w};}); }
+  if (edit) return (
+    <div style={{ display:"flex", gap:6, alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+      <span style={{ fontSize:11, color:C.muted, minWidth:60 }}>{fmtDate(date)}</span>
+      <input value={val} onChange={e=>setVal(e.target.value)} type="number" style={{ flex:1,...mSt }}/>
+      <div onClick={save} style={{ ...pBtn, padding:"5px 10px", fontSize:9 }}>SAVE</div>
+      <div onClick={() => setEdit(false)} style={{ ...gBtn, padding:"5px 10px", fontSize:9 }}>✕</div>
+    </div>
+  );
+  return (
+    <div style={{ position:"relative" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:12 }}>
+        <span style={{ color:C.muted }}>{fmtDate(date)}</span>
+        <span style={{ fontWeight:700 }}>{weight} kg</span>
+        <div onClick={e=>{e.stopPropagation();setMenu(o=>!o);}} style={{ padding:"2px 6px", color:C.muted, cursor:"pointer", fontSize:14, letterSpacing:1 }}>···</div>
+      </div>
+      {menu && (<>
+        <div onClick={()=>setMenu(false)} style={{ position:"fixed", inset:0, zIndex:99 }}/>
+        <div style={{ position:"absolute", right:0, top:32, zIndex:100, background:C.card, border:`1px solid ${C.border}`, borderRadius:8, minWidth:130, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", overflow:"hidden" }}>
+          <div onClick={()=>{setMenu(false);setEdit(true);}} style={{ padding:"11px 14px", fontSize:12, cursor:"pointer", borderBottom:`1px solid ${C.border}` }}>✏️ Edit</div>
+          <div onClick={()=>{setMenu(false);del();}} style={{ padding:"11px 14px", fontSize:12, cursor:"pointer", color:C.red }}>🗑️ Delete</div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function WeightChartCard({ weights, period, setPeriod }) {
+  const [offset, setOffset]   = useState(0);
+  const [hovered, setHovered] = useState(null);
+  const svgRef = useRef(null);
+  const now = new Date();
+
+  function buildPts(off) {
+    if (period === "S") {
+      const dow = (now.getDay()+6)%7;
+      const ws  = addDays(new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow), -off*7);
+      return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((name,i) => {
+        const d = addDays(ws,i); return { label:name, date:toStr(d), value:weights[toStr(d)]??null };
+      });
+    } else if (period === "M") {
+      const base = new Date(now.getFullYear(), now.getMonth()-off, 1);
+      const yr=base.getFullYear(), mo=base.getMonth();
+      const dim = new Date(yr,mo+1,0).getDate();
+      return Array.from({length:dim}, (_,i) => { const d=new Date(yr,mo,i+1); return {label:String(i+1),date:toStr(d),value:weights[toStr(d)]??null}; });
+    } else {
+      const yr = now.getFullYear()-off;
+      return ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((name,mi) => {
+        const dim=new Date(yr,mi+1,0).getDate();
+        const vals=Array.from({length:dim},(_,i)=>weights[toStr(new Date(yr,mi,i+1))]).filter(v=>v!=null);
+        return {label:name, date:yr+"-"+pad2(mi+1), value:vals.length?parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1)):null};
+      });
+    }
+  }
+
+  const pts = buildPts(offset), prev = buildPts(offset+1);
+  const vals = pts.map(p=>p.value).filter(v=>v!=null);
+  const pvals= prev.map(p=>p.value).filter(v=>v!=null);
+  const hasData = vals.length > 0;
+  const avg  = hasData ? parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1)) : null;
+  const pavg = pvals.length ? parseFloat((pvals.reduce((a,b)=>a+b,0)/pvals.length).toFixed(1)) : null;
+  const diff = (avg!=null&&pavg!=null) ? parseFloat((avg-pavg).toFixed(1)) : null;
+
+  let pLabel = "";
+  if (period==="S") { const dow=(now.getDay()+6)%7; const ws=addDays(new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow),-offset*7); pLabel=offset===0?"This week":fmtDate(toStr(ws))+" – "+fmtDate(toStr(addDays(ws,6))); }
+  else if(period==="M") { const d=new Date(now.getFullYear(),now.getMonth()-offset,1); pLabel=d.toLocaleDateString("en-GB",{month:"long",year:"numeric"}); }
+  else { pLabel=String(now.getFullYear()-offset); }
+
+  const W=320,H=130,pL=36,pR=8,pT=10,pB=24,cW=W-pL-pR,cH=H-pT-pB;
+  const minV=hasData?Math.floor(Math.min(...vals))-1:70, maxV=hasData?Math.ceil(Math.max(...vals))+1:90;
+  const px=i=>pL+(i/Math.max(pts.length-1,1))*cW, py=v=>pT+cH-((v-minV)/Math.max(maxV-minV,1))*cH;
+  const range=maxV-minV, step=range<=4?1:range<=10?2:5;
+  const ticks=[]; for(let v=Math.ceil(minV/step)*step;v<=maxV;v+=step)ticks.push(v);
+  const segs=[]; let cur="";
+  pts.forEach((p,i)=>{ if(p.value==null){if(cur){segs.push(cur);cur="";}return;} cur+=cur?" L"+px(i)+","+py(p.value):"M"+px(i)+","+py(p.value); });
+  if(cur)segs.push(cur);
+  const xIdx=period==="S"?[0,1,2,3,4,5,6]:period==="M"?[0,7,14,21,28].filter(i=>i<pts.length):[0,1,2,3,4,5,6,7,8,9,10,11];
+  const hovPt=hovered!=null?pts[hovered]:null;
+
+  function handleMove(e) {
+    if (!svgRef.current||!hasData) return;
+    const rect=svgRef.current.getBoundingClientRect();
+    const cx=e.touches?e.touches[0].clientX:e.clientX;
+    const rx=(cx-rect.left)/rect.width*W;
+    let best=null,bd=Infinity;
+    pts.forEach((p,i)=>{ if(p.value==null)return; const dist=Math.abs(px(i)-rx); if(dist<bd){bd=dist;best=i;} });
+    setHovered(best);
+  }
+
+  return (
+    <Card>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+        <div onClick={()=>setOffset(o=>o+1)} style={{ width:28,height:28,border:`1px solid ${C.border}`,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:16,color:C.muted }}>‹</div>
+        <div style={{ display:"flex", gap:6 }}>
+          {["S","M","A"].map(p=>(
+            <div key={p} onClick={()=>{setPeriod(p);setOffset(0);}} style={{ padding:"4px 14px",borderRadius:20,background:period===p?C.text:"none",color:period===p?"#fff":C.muted,fontSize:10,fontWeight:700,cursor:"pointer",border:`1px solid ${period===p?C.text:C.border}` }}>{p}</div>
+          ))}
+        </div>
+        <div onClick={()=>setOffset(o=>Math.max(0,o-1))} style={{ width:28,height:28,border:`1px solid ${offset===0?"transparent":C.border}`,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",cursor:offset===0?"default":"pointer",fontSize:16,color:offset===0?"transparent":C.muted }}>›</div>
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+        <div>
+          <div style={{ fontSize:9,color:C.muted,letterSpacing:1 }}>AVG · {pLabel.toUpperCase()}</div>
+          {avg!=null
+            ? <div style={{ display:"flex",alignItems:"baseline",gap:4 }}>
+                <span style={{ fontSize:26,fontWeight:700 }}>{hovPt?.value??avg}</span>
+                <span style={{ fontSize:12,color:C.muted }}>kg</span>
+                {hovPt?<span style={{ fontSize:9,color:C.muted,marginLeft:4 }}>{hovPt.date}</span>:null}
+              </div>
+            : <div style={{ fontSize:14,color:C.muted }}>No records</div>
+          }
+        </div>
+        {diff!=null&&!hovPt?<div style={{ textAlign:"right" }}><div style={{ fontSize:9,color:C.muted }}>VS PREV</div><div style={{ fontSize:16,fontWeight:700,color:diff>0?C.red:diff<0?C.green:C.muted }}>{diff>0?"+":""}{diff} kg</div></div>:null}
+      </div>
+      {hasData&&(
+        <svg ref={svgRef} viewBox={"0 0 "+W+" "+H} style={{ width:"100%",height:H,touchAction:"none" }}
+          onMouseMove={handleMove} onMouseLeave={()=>setHovered(null)} onTouchMove={handleMove} onTouchEnd={()=>setHovered(null)}>
+          {ticks.map(v=>(
+            <g key={v}>
+              <line x1={pL} y1={py(v)} x2={W-pR} y2={py(v)} stroke={C.border} strokeWidth={0.5}/>
+              <text x={pL-4} y={py(v)+4} fontSize={8} fill={C.muted} textAnchor="end">{String(v)}</text>
+            </g>
+          ))}
+          {xIdx.map(i=><line key={i} x1={px(i)} y1={pT} x2={px(i)} y2={pT+cH} stroke={C.border} strokeWidth={0.5} strokeDasharray="3,3"/>)}
+          {segs.map((d,i)=><path key={i} d={d} fill="none" stroke={C.blue} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>)}
+          {pts.map((p,i)=>p.value!=null?<circle key={i} cx={px(i)} cy={py(p.value)} r={hovered===i?5:3} fill={hovered===i?C.blue:C.bg} stroke={C.blue} strokeWidth={1.5}/>:null)}
+          {xIdx.map(i=><text key={i} x={px(i)} y={H-4} fontSize={8} fill={C.muted} textAnchor="middle">{String(pts[i]?.label??"")}</text>)}
+          {hovPt!=null&&hovered!=null?<line x1={px(hovered)} y1={pT} x2={px(hovered)} y2={pT+cH} stroke={C.blue} strokeWidth={1} strokeDasharray="3,2"/>:null}
+        </svg>
+      )}
+    </Card>
+  );
+}
+
+function TabGym({ data, update, curDate, setCurDate }) {
+  const [session, setSession] = useState(null);
+  function shiftDate(n) { const d=parseDate(curDate); setCurDate(toStr(addDays(d,n))); }
+  const dateLabel = parseDate(curDate).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  const rawLogs   = data.gymLogs[curDate];
+  const existing  = Array.isArray(rawLogs)?rawLogs:(rawLogs?[rawLogs]:[]);
+  const totalDur  = existing.reduce((a,l)=>a+(l.duration||0),0);
+  const lastSess  = Object.entries(data.gymLogs).sort((a,b)=>b[0].localeCompare(a[0]))
+    .flatMap(([date,logs])=>{ const arr=Array.isArray(logs)?logs:(logs?[logs]:[]); return arr.map(log=>({date,log})); }).slice(0,7);
+  const custom = data.customWorkouts||{};
+
+  function getExs(name, defaults) {
+    const saved = data.workoutTemplates?.[name];
+    if (saved) return saved.map(ex=>({name:ex.name,sets:ex.sets||[],restTimer:ex.restTimer||180,timerActive:false,timerLeft:0}));
+    return defaults.map(ex=>({name:ex,sets:[],restTimer:180,timerActive:false,timerLeft:0}));
+  }
+
+  if (session) return (<GymSession session={session} onClose={()=>setSession(null)} data={data} update={update} curDate={curDate}/>);
+
+  return (
+    <div>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16 }}>
+        <NavArrow dir="left" onClick={()=>shiftDate(-1)}/>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:13,fontWeight:700 }}>{dateLabel}</div>
+          {existing.length>0?<div style={{ fontSize:9,color:C.green,marginTop:2 }}>✓ {existing.length} session{existing.length>1?"s":""} · {totalDur} min</div>:null}
+        </div>
+        <NavArrow dir="right" onClick={()=>shiftDate(1)}/>
+      </div>
+      <div onClick={()=>setSession({workout:"Custom",workoutName:"",exercises:[],startTime:Date.now(),custom:true,isNew:true})}
+        style={{ ...pBtn,width:"100%",boxSizing:"border-box",marginBottom:16,padding:"12px",letterSpacing:2 }}>+ NEW WORKOUT</div>
+      <div style={{ fontSize:10,color:C.muted,letterSpacing:2,marginBottom:10 }}>SELECT WORKOUT</div>
+      {Object.entries(WORKOUTS).map(([name,w])=>(
+        <WCard key={name} name={name} w={w} canDelete={false}
+          onStart={()=>setSession({workout:name,exercises:getExs(name,w.exercises),startTime:Date.now(),custom:false})}
+          onEdit={()=>setSession({workout:name,exercises:getExs(name,w.exercises),startTime:Date.now(),custom:false,editMode:true})}
+          onDelete={null}/>
+      ))}
+      {Object.entries(custom).map(([name,w])=>(
+        <WCard key={name} name={name} w={{...w,color:C.blue}} canDelete={true}
+          onStart={()=>setSession({workout:name,exercises:getExs(name,w.exercises||[]),startTime:Date.now(),custom:true})}
+          onEdit={()=>setSession({workout:name,exercises:getExs(name,w.exercises||[]),startTime:Date.now(),custom:true,editMode:true})}
+          onDelete={()=>update(p=>{const cw={...(p.customWorkouts||{})};delete cw[name];return{...p,customWorkouts:cw};})}/>
+      ))}
+      <Card label="LAST SESSIONS">
+        {lastSess.length===0?<p style={{color:C.muted,fontSize:11}}>No sessions recorded</p>
+          :lastSess.map(({date,log},i)=><LastSess key={date+"-"+(log.id||i)} date={date} log={log} update={update}/>)}
+      </Card>
+    </div>
+  );
+}
+
+function WCard({ name, w, onStart, onEdit, onDelete, canDelete }) {
+  const [menu,setMenu]=useState(false);
+  const exs=Array.isArray(w.exercises)?w.exercises:[];
+  return (
+    <div style={{ position:"relative",marginBottom:8 }}>
+      <div onClick={()=>{if(!menu)onStart();}} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",cursor:"pointer" }}>
+        <div>
+          <div style={{ fontWeight:700,fontSize:14,color:w.color }}>{name}</div>
+          <div style={{ fontSize:10,color:C.muted,marginTop:2 }}>{w.day?w.day+" · ":"" }{exs.length} exercises</div>
+          <div style={{ fontSize:9,color:C.muted,marginTop:3 }}>{exs.slice(0,3).join(", ")}{exs.length>3?"…":""}</div>
+        </div>
+        <div onClick={e=>{e.stopPropagation();setMenu(o=>!o);}} style={{ padding:"4px 8px",color:C.muted,fontSize:18,letterSpacing:1,lineHeight:1,flexShrink:0 }}>···</div>
+      </div>
+      {menu&&(<>
+        <div onClick={()=>setMenu(false)} style={{ position:"fixed",inset:0,zIndex:99 }}/>
+        <div style={{ position:"absolute",right:0,top:"100%",zIndex:100,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,minWidth:160,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",overflow:"hidden" }}>
+          <div onClick={()=>{setMenu(false);onEdit();}} style={{ padding:"12px 16px",fontSize:12,cursor:"pointer",borderBottom:`1px solid ${C.border}` }}>✏️ Edit workout</div>
+          {(canDelete&&onDelete)?<div onClick={()=>{setMenu(false);onDelete();}} style={{ padding:"12px 16px",fontSize:12,cursor:"pointer",color:C.red }}>🗑️ Delete workout</div>:null}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function LastSess({ date, log, update }) {
+  const [exp,setExp]=useState(false);
+  const [menu,setMenu]=useState(false);
+  const [edit,setEdit]=useState(false);
+  const [eDate,setEDate]=useState(date);
+  const [eDur,setEDur]=useState(String(log.duration||0));
+  const [eExs,setEExs]=useState(()=>(log.exercises||[]).map(ex=>({...ex,sets:(ex.sets||[]).map(s=>({...s}))})));
+  const wCol=WORKOUTS[log.workout]?.color||C.blue;
+
+  function del(){
+    update(p=>{
+      const day=Array.isArray(p.gymLogs[date])?p.gymLogs[date]:(p.gymLogs[date]?[p.gymLogs[date]]:[]);
+      const rem=day.filter(l=>l.id!==log.id);
+      const gl={...p.gymLogs}; if(rem.length===0)delete gl[date];else gl[date]=rem;
+      const nx={...p,gymLogs:gl};
+      return{...nx,lifts:recalcLifts(nx)};
+    });
+  }
+
+  function saveEdit(){
+    const nd=eDate||date;
+    update(p=>{
+      const old=Array.isArray(p.gymLogs[date])?p.gymLogs[date]:(p.gymLogs[date]?[p.gymLogs[date]]:[]);
+      const wo=old.filter(l=>l.id!==log.id);
+      const gl={...p.gymLogs}; if(wo.length===0)delete gl[date];else gl[date]=wo;
+      const upd={...log,exercises:eExs,duration:parseInt(eDur)||0};
+      const nd2=Array.isArray(gl[nd])?gl[nd]:(gl[nd]?[gl[nd]]:[]);
+      gl[nd]=[...nd2,upd];
+      const nx={...p,gymLogs:gl};
+      return{...nx,lifts:recalcLifts(nx)};
+    });
+    setEdit(false);
+  }
+
+  if(edit) return (
+    <div style={{ background:C.bg,border:`1px solid ${C.blue}`,borderRadius:8,padding:12,marginBottom:4 }}>
+      <div style={{ fontWeight:700,fontSize:13,color:wCol,marginBottom:10 }}>{log.workout} · Edit</div>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+        <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>DATE</div><input type="date" value={eDate} onChange={e=>setEDate(e.target.value)} style={iSt}/></div>
+        <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>DURATION (min)</div><input type="number" value={eDur} onChange={e=>setEDur(e.target.value)} style={iSt}/></div>
+      </div>
+      {eExs.map((ex,ei)=>(
+        <div key={ei} style={{ marginBottom:8, position:"relative" }}>
+          <div style={{ fontSize:10,fontWeight:700,marginBottom:4,paddingRight:20 }}>{ex.name}</div>
+          <div onClick={()=>setEExs(p=>p.filter((_,xi)=>xi!==ei))} style={{ position:"absolute",top:0,right:0,width:18,height:18,borderRadius:"50%",background:C.red,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer" }}>
+            <span style={{ color:"#fff",fontSize:11,lineHeight:1 }}>×</span>
+          </div>
+          {(ex.sets||[]).map((s,si)=>(
+            <div key={si} style={{ display:"grid",gridTemplateColumns:"28px 60px 60px 28px",gap:4,alignItems:"center",marginBottom:3 }}>
+              <div style={{ fontSize:10,fontWeight:700,color:s.isWarmup?C.orange:C.text,textAlign:"center" }}>{s.isWarmup?"W":si+1}</div>
+              <input type="number" value={s.kg} onChange={e=>setEExs(p=>p.map((x,xi)=>xi!==ei?x:{...x,sets:x.sets.map((ss,ssi)=>ssi!==si?ss:{...ss,kg:parseFloat(e.target.value)||0})}))} style={mSt}/>
+              <input type="number" value={s.reps} onChange={e=>setEExs(p=>p.map((x,xi)=>xi!==ei?x:{...x,sets:x.sets.map((ss,ssi)=>ssi!==si?ss:{...ss,reps:parseFloat(e.target.value)||0})}))} style={mSt}/>
+              <div onClick={()=>setEExs(p=>p.map((x,xi)=>xi!==ei?x:{...x,sets:x.sets.filter((_,ssi)=>ssi!==si)}))} style={{ color:C.red,cursor:"pointer",fontSize:16,textAlign:"center" }}>×</div>
+            </div>
+          ))}
+        </div>
+      ))}
+      <div style={{ display:"flex",gap:8,marginTop:10 }}>
+        <div onClick={()=>setEdit(false)} style={gBtn}>CANCEL</div>
+        <div onClick={saveEdit} style={{ ...pBtn,flex:1 }}>SAVE</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position:"relative" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,fontSize:12 }}>
+        <div onClick={()=>setExp(e=>!e)} style={{ flex:1,cursor:"pointer" }}>
+          <span style={{ color:C.muted,marginRight:8 }}>{fmtDate(date)}</span>
+          <span style={{ color:wCol,fontWeight:700 }}>{log.workout}</span>
+          <span style={{ color:C.muted,marginLeft:8 }}>{log.duration?`${log.duration} min`:"—"}</span>
+        </div>
+        <div onClick={e=>{e.stopPropagation();setMenu(o=>!o);}} style={{ padding:"2px 6px",color:C.muted,cursor:"pointer",fontSize:14,letterSpacing:1 }}>···</div>
+      </div>
+      {exp&&(log.exercises||[]).map((ex,ei)=>(
+        <div key={ei} style={{ padding:"4px 0 4px 8px",borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ fontSize:10,fontWeight:700 }}>{ex.name}</div>
+          {(ex.sets||[]).map((s,si)=>(
+            <div key={si} style={{ fontSize:10,color:C.muted,marginLeft:8 }}>
+              {s.isWarmup?<span style={{color:C.orange}}>[W] </span>:null}{s.reps}r @ {s.kg}kg
+            </div>
+          ))}
+        </div>
+      ))}
+      {menu&&(<>
+        <div onClick={()=>setMenu(false)} style={{ position:"fixed",inset:0,zIndex:99 }}/>
+        <div style={{ position:"absolute",right:0,top:32,zIndex:100,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,minWidth:150,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",overflow:"hidden" }}>
+          <div onClick={()=>{setMenu(false);setEdit(true);}} style={{ padding:"11px 14px",fontSize:12,cursor:"pointer",borderBottom:`1px solid ${C.border}` }}>✏️ Edit session</div>
+          <div onClick={()=>{setMenu(false);del();}} style={{ padding:"11px 14px",fontSize:12,cursor:"pointer",color:C.red }}>🗑️ Delete</div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function ExercisePicker({ onSelect, onClose }) {
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState(null);
+  const q = query.toLowerCase().trim();
+  const categories = Object.keys(EXERCISE_LIBRARY);
+
+  let results = [];
+  if (q.length > 0) {
+    categories.forEach(function(c) {
+      EXERCISE_LIBRARY[c].forEach(function(ex) {
+        if (ex.toLowerCase().includes(q)) results.push({ ex, c });
+      });
+    });
+  } else if (cat) {
+    results = EXERCISE_LIBRARY[cat].map(function(ex) { return { ex, c: cat }; });
+  }
+
+  return (
+    <div style={{ position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end" }}>
+      <div style={{ background:C.bg,borderRadius:"16px 16px 0 0",width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column" }}>
+        <div style={{ padding:"16px 16px 8px",borderBottom:"1px solid "+C.border }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+            <div style={{ fontWeight:700,fontSize:14 }}>Add Exercise</div>
+            <div onClick={onClose} style={{ width:28,height:28,borderRadius:"50%",background:C.border,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer" }}>
+              <span style={{ fontSize:14 }}>×</span>
+            </div>
+          </div>
+          <input
+            autoFocus
+            value={query}
+            onChange={e=>{ setQuery(e.target.value); setCat(null); }}
+            placeholder="Search exercises…"
+            style={{ ...iSt, fontSize:14 }}
+          />
+        </div>
+        <div style={{ overflowY:"auto",flex:1,padding:"8px 16px 32px" }}>
+          {query.length === 0 && !cat ? (
+            <div>
+              {categories.map(function(c) {
+                return (
+                  <div key={c} onClick={()=>setCat(c)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 0",borderBottom:"1px solid "+C.border,cursor:"pointer" }}>
+                    <span style={{ fontSize:13,fontWeight:600 }}>{c}</span>
+                    <span style={{ fontSize:12,color:C.muted }}>›</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {query.length === 0 && cat ? (
+            <div>
+              <div onClick={()=>setCat(null)} style={{ fontSize:10,color:C.blue,cursor:"pointer",marginBottom:12,letterSpacing:1 }}>‹ BACK</div>
+              <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:2,marginBottom:8 }}>{cat.toUpperCase()}</div>
+              {EXERCISE_LIBRARY[cat].map(function(ex) {
+                return (
+                  <div key={ex} onClick={()=>onSelect(ex)} style={{ padding:"13px 0",borderBottom:"1px solid "+C.border,cursor:"pointer",fontSize:13 }}>{ex}</div>
+                );
+              })}
+            </div>
+          ) : null}
+          {results.length > 0 ? (
+            <div>
+              {results.map(function(r,i) {
+                return (
+                  <div key={i} onClick={()=>onSelect(r.ex)} style={{ padding:"13px 0",borderBottom:"1px solid "+C.border,cursor:"pointer" }}>
+                    <div style={{ fontSize:13 }}>{r.ex}</div>
+                    <div style={{ fontSize:10,color:C.muted }}>{r.c}</div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {q.length > 0 && results.length === 0 ? (
+            <div style={{ padding:"20px 0",textAlign:"center",color:C.muted,fontSize:12 }}>No exercises found</div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SwipeRow({ children, onDelete }) {
+  const [offsetX, setOffsetX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startX = useRef(null);
+  const DELETE_W = 80;
+
+  function onTouchStart(e) {
+    startX.current = e.touches[0].clientX;
+    setDragging(true);
+  }
+  function onTouchMove(e) {
+    if (startX.current === null) return;
+    const dx = e.touches[0].clientX - startX.current;
+    if (dx < 0) setOffsetX(Math.max(dx, -DELETE_W));
+  }
+  function onTouchEnd() {
+    setDragging(false);
+    if (offsetX < -(DELETE_W / 2)) {
+      setOffsetX(-DELETE_W);
+    } else {
+      setOffsetX(0);
+    }
+    startX.current = null;
+  }
+
+  const rowStyle = {
+    transform: "translateX(" + offsetX + "px)",
+    transition: dragging ? "none" : "transform 0.2s ease",
+    position: "relative",
+    background: C.card,
+  };
+
+  return (
+    <div style={{ position:"relative", overflow:"hidden", marginBottom:4 }}>
+      <div style={{ position:"absolute", right:0, top:0, bottom:0, width:DELETE_W, background:C.red, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:6 }}>
+        <div onClick={()=>{ setOffsetX(0); onDelete(); }} style={{ color:"#fff", fontSize:11, fontWeight:700, letterSpacing:1, cursor:"pointer", padding:"0 12px" }}>DELETE</div>
+      </div>
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} style={rowStyle}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function GymSession({ session, onClose, data, update, curDate }) {
+
+  function initExs() {
+    return session.exercises.map(ex => ({
+      ...ex,
+      restTimer: ex.restTimer||180,
+      timerActive: false,
+      timerLeft: 0,
+      sets: (ex.sets||[]).map(s => ({
+        ...s,
+        done: false,
+        kgInput:   s.kg   != null ? String(s.kg)   : "",
+        repsInput: s.reps != null ? String(s.reps) : "",
+      }))
+    }));
+  }
+  const [exs,setExs]     = useState(initExs);
+  const [wName,setWName] = useState(session.workoutName||"");
+  const [cEx,setCEx]     = useState("");
+  const [showPicker,setShowPicker] = useState(false);
+  const [elapsed,setEl]  = useState(0);
+  const t0  = useRef(session.startTime);
+  const ivs = useRef({});
+
+  useEffect(()=>{
+    if(session.editMode||session.isNew) return;
+    const t=setInterval(()=>setEl(Math.floor((Date.now()-t0.current)/60000)),15000);
+    return()=>clearInterval(t);
+  },[]);
+
+  function vibrate(pattern) {
+    try { if(navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
+  }
+
+  const audioCtxRef = useRef(null);
+
+  function getCtx() {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume();
+      }
+      return audioCtxRef.current;
+    } catch(e) { return null; }
+  }
+
+  function playTick() {
+    const ctx = getCtx(); if(!ctx) return;
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.15);
+    } catch(e) {}
+  }
+
+  function playBell() {
+    const ctx = getCtx(); if(!ctx) return;
+    try {
+      const gain = ctx.createGain();
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.7, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2);
+      [523, 659, 784].forEach(function(freq, i) {
+        const osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.15);
+        osc.connect(gain);
+        osc.start(ctx.currentTime + i * 0.15);
+        osc.stop(ctx.currentTime + i * 0.15 + 2);
+      });
+    } catch(e) {}
+  }
+
+  function startT(ei){ getCtx(); vibrate(50); clearInterval(ivs.current[ei]); setExs(p=>p.map((e,i)=>i===ei?{...e,timerActive:true,timerLeft:e.restTimer}:e)); ivs.current[ei]=setInterval(()=>setExs(p=>{ const e=p[ei]; if(!e||!e.timerActive){clearInterval(ivs.current[ei]);return p;} const n=e.timerLeft-1; if(n<=0){clearInterval(ivs.current[ei]);playBell();vibrate([200,100,200,100,400]);return p.map((x,i)=>i===ei?{...x,timerActive:false,timerLeft:0}:x);} return p.map((x,i)=>i===ei?{...x,timerLeft:n}:x); }),1000); }
+  function stopT(ei){ clearInterval(ivs.current[ei]); setExs(p=>p.map((e,i)=>i===ei?{...e,timerActive:false,timerLeft:0}:e)); }
+  function chRT(ei,d){ setExs(p=>p.map((e,i)=>i===ei?{...e,restTimer:Math.max(30,e.restTimer+d)}:e)); }
+
+  function confirmSet(ei,si){
+    setExs(p=>p.map((ex,i)=>{
+      if(i!==ei) return ex;
+      const sets=ex.sets.map((s,j)=>{
+        if(j!==si) return s;
+        const kg   = parseFloat(s.kgInput)   || s.kg   || 0;
+        const reps = parseFloat(s.repsInput) || s.reps || 0;
+        return {...s, kg, reps, kgInput:String(kg), repsInput:String(reps), done:true};
+      });
+      return {...ex, sets};
+    }));
+
+    if(exs[ei]?.sets[si]) { vibrate(60); playTick(); startT(ei); }
+  }
+  function unconfirmSet(ei,si){ setExs(p=>p.map((ex,i)=>i!==ei?ex:{...ex,sets:ex.sets.map((s,j)=>j!==si?s:{...s,done:false})})); }
+
+  function updInput(ei,si,f,v){ setExs(p=>p.map((ex,i)=>i!==ei?ex:{...ex,sets:ex.sets.map((s,j)=>j!==si?s:{...s,[f]:v})})); }
+  function remSet(ei,si){ setExs(p=>p.map((ex,i)=>i!==ei?ex:{...ex,sets:ex.sets.filter((_,j)=>j!==si)})); }
+
+  function addSet(ei,isW){
+    setExs(p=>p.map((ex,i)=>{
+      if(i!==ei) return ex;
+      const pv=[...ex.sets].reverse().find(s=>s.isWarmup===isW);
+      const ns={reps:pv?.reps||(isW?8:10),kg:pv?.kg||0,isWarmup:isW,done:false,
+                kgInput:pv?.kg!=null?String(pv.kg):"",repsInput:pv?.reps!=null?String(pv.reps):""};
+      if(isW){
+        const a=[...ex.sets];
+        const lw=a.map((s,si)=>({s,si})).filter(({s})=>s.isWarmup).at(-1);
+        a.splice(lw?lw.si+1:0,0,ns);
+        return{...ex,sets:a};
+      }
+      return{...ex,sets:[...ex.sets,ns]};
+    }));
+  }
+
+  function addCEx(){ if(!cEx.trim())return; setExs(p=>[...p,{name:cEx.trim(),sets:[],restTimer:180,timerActive:false,timerLeft:0}]); setCEx(""); }
+
+  function moveEx(ei, dir) {
+    const to = ei + dir;
+    setExs(p => {
+      if (to < 0 || to >= p.length) return p;
+      const arr = [...p];
+      const moved = arr.splice(ei, 1)[0];
+      arr.splice(to, 0, moved);
+      return arr;
+    });
+  }
+
+  function finish(){
+    const dur=Math.floor((Date.now()-t0.current)/60000)||elapsed;
+    const fn=session.isNew?(wName.trim()||"Custom"):session.workout;
+
+    const finalExs=exs.map(ex=>({...ex,sets:ex.sets.map(s=>({
+      ...s,
+      kg:   parseFloat(s.kgInput)   || s.kg   || 0,
+      reps: parseFloat(s.repsInput) || s.reps || 0,
+    }))}));
+    update(p=>{
+      let nx={...p};
+      const tmpl=finalExs.map(ex=>({name:ex.name,sets:ex.sets.map(s=>({kg:s.kg,reps:s.reps,isWarmup:s.isWarmup})),restTimer:ex.restTimer}));
+      if(session.isNew){
+        nx={...nx,customWorkouts:{...(p.customWorkouts||{}),[fn]:{exercises:finalExs.map(e=>e.name),day:"",color:C.blue}},workoutTemplates:{...(p.workoutTemplates||{}),[fn]:tmpl}};
+      } else {
+        nx={...nx,workoutTemplates:{...(p.workoutTemplates||{}),[fn]:tmpl}};
+      }
+      if(!session.editMode){
+        const log={workout:fn,exercises:finalExs,duration:dur,id:Date.now()};
+        const ex=nx.gymLogs[curDate];const day=Array.isArray(ex)?ex:(ex?[ex]:[]);
+        const gl={...nx.gymLogs,[curDate]:[...day,log]};
+        nx={...nx,gymLogs:gl,lifts:recalcLifts({...nx,gymLogs:gl})};
+      }
+      return nx;
+    });
+    onClose();
+  }
+
+  const isEN=session.editMode||session.isNew;
+  return (
+    <div>
+
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,position:"sticky",top:0,background:C.bg,paddingBottom:8,zIndex:10 }}>
+        <div>
+          {session.isNew
+            ?<input value={wName} onChange={e=>setWName(e.target.value)} placeholder="Workout name…" style={{ fontSize:15,fontWeight:700,fontFamily:"inherit",background:"none",border:"none",borderBottom:`2px solid ${C.border}`,outline:"none",width:200 }}/>
+            :<div style={{ fontWeight:700,fontSize:15 }}>{session.editMode?`${session.workout} · Edit`:session.workout}</div>}
+          {!isEN?<div style={{ fontSize:10,color:C.muted }}>{elapsed} min</div>:null}
+        </div>
+        <div style={{ display:"flex",gap:8 }}>
+          <div onClick={onClose} style={gBtn}>CANCEL</div>
+          <div onClick={finish} style={pBtn}>{isEN?"SAVE":"FINISH"}</div>
+        </div>
+      </div>
+
+      {exs.map((ex,ei)=>{
+        const allSets=ex.sets.map((s,i)=>({s,i}));
+        const warmups=allSets.filter(({s})=>s.isWarmup);
+        const working=allSets.filter(({s})=>!s.isWarmup);
+        const tm=Math.floor(ex.restTimer/60),ts=ex.restTimer%60;
+        return(
+          <div key={ei} style={{ background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:14,marginBottom:14 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+              <div style={{ display:"flex",flexDirection:"column",gap:2,marginRight:8,flexShrink:0 }}>
+                <div onClick={()=>moveEx(ei,-1)} style={{ width:28,height:24,display:"flex",alignItems:"center",justifyContent:"center",background:ei===0?"#f0f0f0":C.bg,border:"1px solid "+C.border,borderRadius:"4px 4px 0 0",cursor:ei===0?"default":"pointer",opacity:ei===0?0.3:1 }}>
+                  <span style={{ fontSize:12,color:C.muted,lineHeight:1 }}>▲</span>
+                </div>
+                <div onClick={()=>moveEx(ei,1)} style={{ width:28,height:24,display:"flex",alignItems:"center",justifyContent:"center",background:ei===exs.length-1?"#f0f0f0":C.bg,border:"1px solid "+C.border,borderRadius:"0 0 4px 4px",borderTop:"none",cursor:ei===exs.length-1?"default":"pointer",opacity:ei===exs.length-1?0.3:1 }}>
+                  <span style={{ fontSize:12,color:C.muted,lineHeight:1 }}>▼</span>
+                </div>
+              </div>
+              <div style={{ fontWeight:700,fontSize:14,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ex.name}</div>
+              <div onClick={()=>setExs(p=>p.filter((_,xi)=>xi!==ei))} style={{ width:22,height:22,borderRadius:"50%",background:C.red,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,marginLeft:8 }}>
+                <span style={{ color:"#fff",fontSize:13,lineHeight:1 }}>×</span>
+              </div>
+            </div>
+
+            <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+              <span style={{ fontSize:9,color:C.blue }}>⏱ REST</span>
+              <div onClick={()=>chRT(ei,-30)} style={{ padding:"3px 8px",background:"none",border:`1px solid ${C.border}`,borderRadius:4,fontSize:10,cursor:"pointer" }}>−</div>
+              <span style={{ fontSize:11,fontWeight:700,minWidth:44,textAlign:"center" }}>{tm}m{ts>0?` ${ts}s`:""}</span>
+              <div onClick={()=>chRT(ei,30)} style={{ padding:"3px 8px",background:"none",border:`1px solid ${C.border}`,borderRadius:4,fontSize:10,cursor:"pointer" }}>+</div>
+              {ex.timerActive
+                ?<div onClick={()=>stopT(ei)} style={{ padding:"3px 8px",background:"none",border:`1px solid ${C.border}`,borderRadius:4,fontSize:10,cursor:"pointer",color:C.red,marginLeft:4 }}>■ {ex.timerLeft}s</div>
+                :<div onClick={()=>startT(ei)} style={{ padding:"3px 8px",background:"none",border:`1px solid ${C.border}`,borderRadius:4,fontSize:10,cursor:"pointer",color:C.blue,marginLeft:4 }}>▶ START</div>}
+            </div>
+
+            <div style={{ display:"grid",gridTemplateColumns:"32px 1fr 1fr 1fr 36px",gap:4,marginBottom:6,paddingLeft:2 }}>
+              {["#","ANTERIOR","KG","REPS",""].map((h,i)=><div key={i} style={{ fontSize:8,color:C.muted,letterSpacing:1,textAlign:"center" }}>{h}</div>)}
+            </div>
+
+            {[...warmups,...working].map(({s,i},idx)=>{
+              const isW=s.isWarmup;
+              const wkIdx=working.findIndex(({i:wi})=>wi===i);
+              const label=isW?"W":String(wkIdx+1);
+              const labelColor=isW?C.orange:C.text;
+              const prevKg   = s.kg   != null ? s.kg   : null;
+              const prevReps = s.reps != null ? s.reps : null;
+              const prevTxt  = prevKg!=null&&prevReps!=null ? `${prevKg}×${prevReps}` : "—";
+              const rowBg    = s.done ? "#e8f5e9" : "transparent";
+              const swipeKey = `${ei}-${i}`;
+              return(
+                <SwipeRow key={i} onDelete={()=>remSet(ei,i)}>
+                  <div style={{ display:"grid",gridTemplateColumns:"32px 1fr 1fr 1fr 36px",gap:4,alignItems:"center",padding:"2px 0",borderRadius:6,background:rowBg }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:labelColor,textAlign:"center" }}>{label}</div>
+                    <div style={{ fontSize:10,color:C.muted,textAlign:"center" }}>{prevTxt}</div>
+                    <input
+                      type="number" inputMode="decimal"
+                      value={s.kgInput}
+                      placeholder={prevKg!=null?String(prevKg):"0"}
+                      onChange={e=>updInput(ei,i,"kgInput",e.target.value)}
+                      style={{ ...mSt, background:s.done?"#e8f5e9":C.bg, color:s.done?C.green:C.text, fontWeight:s.done?700:400 }}
+                    />
+                    <input
+                      type="number" inputMode="numeric"
+                      value={s.repsInput}
+                      placeholder={prevReps!=null?String(prevReps):"0"}
+                      onChange={e=>updInput(ei,i,"repsInput",e.target.value)}
+                      style={{ ...mSt, background:s.done?"#e8f5e9":C.bg, color:s.done?C.green:C.text, fontWeight:s.done?700:400 }}
+                    />
+                    {s.done
+                      ?<div onClick={()=>unconfirmSet(ei,i)} style={{ width:28,height:28,borderRadius:6,background:C.green,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",margin:"0 auto" }}>
+                          <span style={{ color:"#fff",fontSize:14 }}>✓</span>
+                        </div>
+                      :<div onClick={()=>confirmSet(ei,i)} style={{ width:28,height:28,borderRadius:6,border:`2px solid ${C.border}`,background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",margin:"0 auto" }}>
+                          <span style={{ color:C.muted,fontSize:14 }}>✓</span>
+                        </div>
+                    }
+                  </div>
+                </SwipeRow>
+              );
+            })}
+
+            <div style={{ display:"flex",gap:6,marginTop:10 }}>
+              <div onClick={()=>addSet(ei,true)} style={{ padding:"8px 12px",border:`1px solid ${C.orange}`,borderRadius:6,color:C.orange,fontSize:9,cursor:"pointer",fontFamily:"inherit",letterSpacing:1 }}>+ W</div>
+              <div onClick={()=>addSet(ei,false)} style={{ flex:1,padding:"8px 12px",border:`1px solid ${C.border}`,borderRadius:6,color:C.muted,fontSize:9,cursor:"pointer",fontFamily:"inherit",textAlign:"center",letterSpacing:1 }}>+ SET</div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ marginTop:12 }}>
+        <div onClick={()=>setShowPicker(true)} style={{ ...pBtn,width:"100%",boxSizing:"border-box",padding:"12px",letterSpacing:2 }}>+ ADD EXERCISE</div>
+      </div>
+      {showPicker ? (
+        <ExercisePicker
+          onSelect={function(name) { setExs(p=>[...p,{name,sets:[],restTimer:180,timerActive:false,timerLeft:0}]); setShowPicker(false); }}
+          onClose={function() { setShowPicker(false); }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function TabCardio({ data, update }) {
+  const [type,setType]       = useState(null);
+  const [dur,setDur]         = useState("30");
+  const [selDate,setSelDate] = useState(todayStr);
+  const ex = data.cardioLogs[selDate];
+  function save(){ if(!type)return; update(p=>({...p,cardioLogs:{...p.cardioLogs,[selDate]:{type,duration:parseInt(dur)||30}}})); }
+  function rem(){ update(p=>{const c={...p.cardioLogs};delete c[selDate];return{...p,cardioLogs:c};}); }
+  return (
+    <div>
+      <Card label="LOG CARDIO">
+        <input type="date" value={selDate} onChange={e=>setSelDate(e.target.value)} style={{ ...iSt,width:"auto",marginBottom:12 }}/>
+        {ex?(
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0" }}>
+            <div><div style={{ fontWeight:700,fontSize:14,color:ex.type==="zone2"?C.green:C.red }}>{ex.type==="zone2"?"Zone 2":"HIT"}</div><div style={{ fontSize:11,color:C.muted }}>{ex.duration} min</div></div>
+            <div onClick={rem} style={{ ...gBtn,color:C.red }}>REMOVE</div>
+          </div>
+        ):(
+          <div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
+              {[["zone2","ZONE 2",C.green],["hit","HIT",C.red]].map(([t,l,col])=>(
+                <div key={t} onClick={()=>setType(t)} style={{ padding:"16px",border:`2px solid ${type===t?col:C.border}`,borderRadius:8,background:type===t?col+"18":"none",color:type===t?col:C.muted,fontWeight:700,fontSize:12,cursor:"pointer",textAlign:"center",fontFamily:"inherit" }}>{l}</div>
+              ))}
+            </div>
+            <div style={{ fontSize:10,color:C.muted,marginBottom:6 }}>DURATION (MIN)</div>
+            <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+              {["30","45","60","90"].map(d=>(
+                <div key={d} onClick={()=>setDur(d)} style={{ flex:1,padding:"9px 4px",border:`1px solid ${dur===d?C.text:C.border}`,background:dur===d?C.text:"none",color:dur===d?"#fff":C.muted,fontFamily:"inherit",fontSize:11,borderRadius:4,cursor:"pointer",textAlign:"center" }}>{d}</div>
+              ))}
+            </div>
+            <input value={dur} onChange={e=>setDur(e.target.value)} type="number" placeholder="other" style={{ ...iSt,marginBottom:10 }}/>
+            <div onClick={save} style={{ ...pBtn,opacity:type?1:0.4,pointerEvents:type?"auto":"none" }}>SAVE</div>
+          </div>
+        )}
+      </Card>
+      <Card label="LAST SESSIONS">
+        {Object.entries(data.cardioLogs).length===0?<p style={{color:C.muted,fontSize:11}}>No sessions</p>
+          :Object.entries(data.cardioLogs).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7).map(([d,c])=><CardioRow key={d} date={d} session={c} update={update}/>)}
+      </Card>
+    </div>
+  );
+}
+
+function CardioRow({ date, session, update }) {
+  const [menu,setMenu]=useState(false);
+  const [edit,setEdit]=useState(false);
+  const [ed,setEd]=useState(date);
+  const [edur,setEdur]=useState(String(session.duration));
+  function del(){ update(p=>{const c={...p.cardioLogs};delete c[date];return{...p,cardioLogs:c};}); }
+  function saveE(){ const nd=ed||date; update(p=>{const c={...p.cardioLogs};delete c[date];c[nd]={...session,duration:parseInt(edur)||session.duration};return{...p,cardioLogs:c};}); setEdit(false); }
+  if(edit) return(
+    <div style={{ background:C.bg,border:`1px solid ${C.blue}`,borderRadius:8,padding:12,marginBottom:4 }}>
+      <div style={{ fontWeight:700,fontSize:12,color:session.type==="zone2"?C.green:C.red,marginBottom:10 }}>{session.type==="zone2"?"Zone 2":"HIT"}</div>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+        <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>DATE</div><input type="date" value={ed} onChange={e=>setEd(e.target.value)} style={iSt}/></div>
+        <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>DURATION</div><input type="number" value={edur} onChange={e=>setEdur(e.target.value)} style={iSt}/></div>
+      </div>
+      <div style={{ display:"flex",gap:8 }}><div onClick={()=>setEdit(false)} style={gBtn}>CANCEL</div><div onClick={saveE} style={{ ...pBtn,flex:1 }}>SAVE</div></div>
+    </div>
+  );
+  return(
+    <div style={{ position:"relative" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,fontSize:12 }}>
+        <span style={{ color:C.muted }}>{fmtDate(date)}</span>
+        <span style={{ color:session.type==="zone2"?C.green:C.red,fontWeight:700 }}>{session.type==="zone2"?"Zone 2":"HIT"}</span>
+        <span>{session.duration} min</span>
+        <div onClick={e=>{e.stopPropagation();setMenu(o=>!o);}} style={{ padding:"2px 6px",color:C.muted,cursor:"pointer",fontSize:14,letterSpacing:1 }}>···</div>
+      </div>
+      {menu&&(<>
+        <div onClick={()=>setMenu(false)} style={{ position:"fixed",inset:0,zIndex:99 }}/>
+        <div style={{ position:"absolute",right:0,top:32,zIndex:100,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,minWidth:150,boxShadow:"0 4px 16px rgba(0,0,0,0.12)",overflow:"hidden" }}>
+          <div onClick={()=>{setMenu(false);setEdit(true);}} style={{ padding:"11px 14px",fontSize:12,cursor:"pointer",borderBottom:`1px solid ${C.border}` }}>✏️ Edit session</div>
+          <div onClick={()=>{setMenu(false);del();}} style={{ padding:"11px 14px",fontSize:12,cursor:"pointer",color:C.red }}>🗑️ Delete</div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
+function OrmChart({ recs }) {
+  if (!recs || recs.length === 0) return null;
+  const pts = recs.slice(-7);
+  const orms = pts.map(r => r.orm);
+  const mn = Math.min.apply(null, orms);
+  const mx = Math.max.apply(null, orms);
+  const pad = (mx - mn) < 1 ? 3 : (mx - mn) * 0.25;
+  const lo = mn - pad, hi = mx + pad;
+  const W = 300, H = 110;
+  const PADX = 14, PADY = 14;
+  const latest = pts[pts.length - 1];
+  function cx(i) { return pts.length === 1 ? W/2 : PADX + (i / (pts.length - 1)) * (W - PADX*2); }
+  function cy(v) { return PADY + (H - PADY*2) - ((v - lo) / (hi - lo)) * (H - PADY*2); }
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+        <span style={{ fontSize:10, color:C.muted, letterSpacing:1.5 }}>1RM ESTIMATED</span>
+        <span style={{ fontSize:22, fontWeight:700, color:C.blue }}>{latest.orm}<span style={{ fontSize:11, color:C.muted }}> kg</span></span>
+      </div>
+      <svg viewBox={"0 0 "+W+" "+H} style={{ width:"100%", height:H }} preserveAspectRatio="none">
+        {pts.length > 1 ? (
+          <polyline
+            points={pts.map((r,i) => cx(i)+","+cy(r.orm)).join(" ")}
+            fill="none" stroke={C.border} strokeWidth={1.5}
+          />
+        ) : null}
+        {pts.map((r,i) => (
+          <circle key={i} cx={cx(i)} cy={cy(r.orm)} r={i === pts.length-1 ? 6 : 4}
+            fill={i === pts.length-1 ? C.blue : "#fff"} stroke={C.blue} strokeWidth={2}/>
+        ))}
+        {pts.map((r,i) => (
+          <text key={"t"+i} x={cx(i)} y={cy(r.orm)-10} textAnchor="middle"
+            fontSize="9" fill={i === pts.length-1 ? C.blue : C.muted}>{r.orm}</text>
+        ))}
+      </svg>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:8, color:C.muted, marginTop:4 }}>
+        <span>{fmtDate(pts[0].date)}</span>
+        {pts.length > 1 ? <span>{fmtDate(pts[pts.length-1].date)}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function VolumeChart({ recs }) {
+  if (!recs || recs.length === 0) return null;
+  const pts = recs.slice(-7);
+  const vols = pts.map(r => r.volume || 0);
+  const mn = Math.min.apply(null, vols);
+  const mx = Math.max.apply(null, vols);
+  const pad = (mx - mn) < 1 ? 10 : (mx - mn) * 0.25;
+  const lo = mn - pad, hi = mx + pad;
+  const W = 300, H = 110;
+  const PADX = 14, PADY = 14;
+  const latest = pts[pts.length - 1];
+  function cx(i) { return pts.length === 1 ? W/2 : PADX + (i / (pts.length - 1)) * (W - PADX*2); }
+  function cy(v) { return PADY + (H - PADY*2) - ((v - lo) / (hi - lo)) * (H - PADY*2); }
+  return (
+    <div style={{ marginTop:20, paddingTop:16, borderTop:"1px solid "+C.border }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+        <span style={{ fontSize:10, color:C.muted, letterSpacing:1.5 }}>TOTAL VOLUME</span>
+        <span style={{ fontSize:22, fontWeight:700, color:C.green }}>{latest.volume}<span style={{ fontSize:11, color:C.muted }}> kg</span></span>
+      </div>
+      <svg viewBox={"0 0 "+W+" "+H} style={{ width:"100%", height:H }} preserveAspectRatio="none">
+        {pts.length > 1 ? (
+          <polyline
+            points={pts.map(function(r,i) { return cx(i)+","+cy(r.volume||0); }).join(" ")}
+            fill="none" stroke={C.border} strokeWidth={1.5}
+          />
+        ) : null}
+        {pts.map(function(r,i) {
+          return <circle key={i} cx={cx(i)} cy={cy(r.volume||0)} r={i === pts.length-1 ? 6 : 4}
+            fill={i === pts.length-1 ? C.green : "#fff"} stroke={C.green} strokeWidth={2}/>;
+        })}
+        {pts.map(function(r,i) {
+          return <text key={"t"+i} x={cx(i)} y={cy(r.volume||0)-10} textAnchor="middle"
+            fontSize="9" fill={i === pts.length-1 ? C.green : C.muted}>{r.volume||0}</text>;
+        })}
+      </svg>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:8, color:C.muted, marginTop:4 }}>
+        <span>{fmtDate(pts[0].date)}</span>
+        {pts.length > 1 ? <span>{fmtDate(pts[pts.length-1].date)}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function TabLifts({ data }) {
+  const [sel,setSel]=useState(null);
+  const custom=data.customWorkouts||{};
+  const allCat=new Set([...Object.values(WORKOUTS).flatMap(w=>w.exercises),...Object.values(custom).flatMap(w=>w.exercises||[])]);
+  const uncat=Object.keys(data.lifts||{}).filter(ex=>!allCat.has(ex));
+
+  if(sel){
+    const recs=(data.lifts[sel]||[]).sort((a,b)=>a.date.localeCompare(b.date));
+    const latest=recs.length?recs[recs.length-1]:null;
+    return(
+      <div>
+        <div onClick={()=>setSel(null)} style={{ ...gBtn,marginBottom:14,cursor:"pointer" }}>‹ LIFTS</div>
+        <div style={{ fontWeight:700,fontSize:16,marginBottom:4 }}>{sel}</div>
+
+        {recs.length===0 ? <p style={{color:C.muted,fontSize:11}}>No records yet. Complete a workout to start tracking.</p> : null}
+        {recs.length > 0 ? (
+          <Card>
+            <OrmChart recs={recs}/>
+            <VolumeChart recs={recs}/>
+          </Card>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderExRow(ex) {
+    const recs = data.lifts?.[ex];
+    const latest = recs && recs.length ? recs[recs.length-1] : null;
+    return(
+      <div key={ex} onClick={()=>setSel(ex)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:C.card,border:"1px solid "+C.border,borderRadius:6,marginBottom:4,cursor:"pointer" }}>
+        <span style={{ fontSize:12 }}>{ex}</span>
+        {latest ? (
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.blue }}>{latest.orm} kg</div>
+            <div style={{ fontSize:9,color:C.muted }}>1RM est.</div>
+          </div>
+        ) : <span style={{ fontSize:10,color:C.muted }}>no data</span>}
+      </div>
+    );
+  }
+
+  return(
+    <div>
+      {Object.entries(WORKOUTS).map(([name,w])=>(
+        <div key={name} style={{ marginBottom:16 }}>
+          <div style={{ fontSize:10,letterSpacing:2,color:w.color,marginBottom:8 }}>{name.toUpperCase()}</div>
+          {w.exercises.map(ex=>renderExRow(ex))}
+        </div>
+      ))}
+      {Object.entries(custom).map(([name,w])=>(
+        <div key={name} style={{ marginBottom:16 }}>
+          <div style={{ fontSize:10,letterSpacing:2,color:C.blue,marginBottom:8 }}>{name.toUpperCase()}</div>
+          {(w.exercises||[]).map(ex=>renderExRow(ex))}
+        </div>
+      ))}
+      {uncat.length>0 ? (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:10,letterSpacing:2,color:C.muted,marginBottom:8 }}>OTHER</div>
+          {uncat.map(ex=>renderExRow(ex))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TabSeason({ data, update }) {
+  const [adding,setAdding]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [eS,setES]=useState(""); const [eE,setEE]=useState("");
+  const [nT,setNT]=useState("cut"); const [nS,setNS]=useState(""); const [nE,setNE]=useState("");
+  const phases=(data.phases?.length)?data.phases:DEFAULT_PHASES;
+  const now=todayStr();
+  const TM={cut:{label:"CUT",color:C.red},maintenance:{label:"MAINTENANCE",color:C.green},bulk:{label:"BULK",color:C.blue}};
+
+  function saveEdit(){ if(!eS||!eE)return; update(p=>({...p,phases:(p.phases||DEFAULT_PHASES).map(ph=>ph.id===editId?{...ph,start:eS,end:eE}:ph).sort((a,b)=>a.start.localeCompare(b.start))})); setEditId(null); }
+  function addPh(){ if(!nS||!nE)return; const t=TM[nT]; update(p=>({...p,phases:[...(p.phases||DEFAULT_PHASES),{id:Date.now(),type:nT,label:t.label,color:t.color,start:nS,end:nE}].sort((a,b)=>a.start.localeCompare(b.start))})); setAdding(false);setNS("");setNE(""); }
+  function remPh(id){ update(p=>({...p,phases:(p.phases||DEFAULT_PHASES).filter(ph=>ph.id!==id)})); }
+
+  return(
+    <div>
+      <div style={{ fontSize:10,color:C.muted,letterSpacing:2,marginBottom:12 }}>PLAN · PHASES</div>
+      {phases.map(ph=>{
+        const isCur=now>=ph.start&&now<=ph.end, isPast=now>ph.end, isEdit=editId===ph.id;
+        const allD=Object.keys(data.weights||{}).sort();
+        const inPh=allD.filter(d=>d>=ph.start&&d<=ph.end);
+        const startW=inPh.length?data.weights[inPh[0]]:null;
+        const edReached=now>=ph.end;
+        const endW=edReached?(inPh.length?data.weights[inPh[inPh.length-1]]:null):(allD.filter(d=>d<=now).at(-1)!=null?data.weights[allD.filter(d=>d<=now).at(-1)]:null);
+        const wDiff=(startW!=null&&endW!=null)?parseFloat((endW-startW).toFixed(1)):null;
+        return(
+          <div key={ph.id} style={{ marginBottom:6 }}>
+            <div style={{ padding:"12px 14px",borderRadius:isEdit?"8px 8px 0 0":8,background:isCur?C.text:C.card,border:`1px solid ${isCur?C.text:C.border}`,opacity:isPast?0.6:1 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:(startW!=null||endW!=null)?10:0 }}>
+                <div style={{ width:8,height:8,borderRadius:"50%",background:ph.color,flexShrink:0 }}/>
+                <div style={{ flex:1 }}><div style={{ fontSize:11,fontWeight:700,color:isCur?"#fff":C.text }}>{ph.label}</div><div style={{ fontSize:9,color:isCur?"#ccc":C.muted }}>{fmtDate(ph.start)} → {fmtDate(ph.end)}</div></div>
+                <div onClick={()=>isEdit?setEditId(null):(setEditId(ph.id),setES(ph.start),setEE(ph.end),setAdding(false))} style={{ fontSize:9,color:C.blue,cursor:"pointer",fontWeight:700 }}>{isEdit?"✕":"EDIT"}</div>
+              </div>
+              {(startW!=null||endW!=null)&&(
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:`1px solid ${isCur?"#ffffff22":C.border}` }}>
+                  <div style={{ textAlign:"center" }}><div style={{ fontSize:8,color:isCur?"#aaa":C.muted,marginBottom:2 }}>{fmtDate(ph.start)}</div><div style={{ fontSize:13,fontWeight:700,color:isCur?"#fff":C.text }}>{startW!=null?`${startW}kg`:"—"}</div></div>
+                  <div style={{ textAlign:"center" }}>{wDiff!=null?<div style={{ fontSize:15,fontWeight:700,color:wDiff>0?C.red:wDiff<0?C.green:C.muted }}>{wDiff>0?"+":""}{wDiff} kg</div>:<div style={{ fontSize:11,color:isCur?"#aaa":C.muted }}>—</div>}</div>
+                  <div style={{ textAlign:"center" }}><div style={{ fontSize:8,color:isCur?"#aaa":C.muted,marginBottom:2 }}>{fmtDate(ph.end)}</div><div style={{ fontSize:13,fontWeight:700,color:isCur?"#fff":C.text }}>{endW!=null?`${endW}kg`:"—"}</div></div>
+                </div>
+              )}
+            </div>
+            {isEdit&&(
+              <div style={{ background:C.card,border:`1px solid ${C.border}`,borderTop:"none",borderRadius:"0 0 8px 8px",padding:"12px 14px" }}>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+                  <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>START</div><input type="date" value={eS} onChange={e=>setES(e.target.value)} style={iSt}/></div>
+                  <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>END</div><input type="date" value={eE} onChange={e=>setEE(e.target.value)} style={iSt}/></div>
+                </div>
+                <div style={{ display:"flex",gap:8 }}><div onClick={()=>{remPh(ph.id);setEditId(null);}} style={{ ...gBtn,color:C.red,cursor:"pointer" }}>DELETE</div><div onClick={saveEdit} style={{ ...pBtn,flex:1 }}>SAVE</div></div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {adding?(
+        <Card label="NEW PHASE">
+          <div style={{ display:"flex",gap:6,marginBottom:10 }}>
+            {Object.entries(TM).map(([t,tm])=>(<div key={t} onClick={()=>setNT(t)} style={{ flex:1,padding:"8px 4px",border:`2px solid ${nT===t?tm.color:C.border}`,borderRadius:6,background:nT===t?tm.color+"18":"none",color:nT===t?tm.color:C.muted,fontFamily:"inherit",fontSize:9,fontWeight:700,cursor:"pointer",textAlign:"center" }}>{tm.label}</div>))}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+            <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>START</div><input type="date" value={nS} onChange={e=>setNS(e.target.value)} style={iSt}/></div>
+            <div><div style={{ fontSize:9,color:C.muted,marginBottom:4 }}>END</div><input type="date" value={nE} onChange={e=>setNE(e.target.value)} style={iSt}/></div>
+          </div>
+          <div style={{ display:"flex",gap:8 }}><div onClick={()=>setAdding(false)} style={{ ...gBtn,cursor:"pointer" }}>CANCEL</div><div onClick={addPh} style={{ ...pBtn,flex:1 }}>ADD</div></div>
+        </Card>
+      ):(
+        <div onClick={()=>setAdding(true)} style={{ width:"100%",padding:"12px",background:"none",border:`1px dashed ${C.border}`,borderRadius:8,fontFamily:"inherit",fontSize:10,letterSpacing:2,color:C.muted,cursor:"pointer",marginTop:8,textAlign:"center",boxSizing:"border-box" }}>+ NEW PHASE</div>
+      )}
+    </div>
+  );
+}
+
+function TabWeekly({ data }) {
+  const [offset,setOffset]=useState(0);
+  const now=new Date();
+  const dow=(now.getDay()+6)%7;
+  const wStart=addDays(new Date(now.getFullYear(),now.getMonth(),now.getDate()-dow),-offset*7);
+  const wDays=Array.from({length:7},(_,i)=>addDays(wStart,i));
+  const todayS=todayStr();
+  const DN=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const wL=offset===0?"This week":`${fmtDate(toStr(wStart))} – ${fmtDate(toStr(addDays(wStart,6)))}`;
+  const wW=wDays.map(d=>data.weights[toStr(d)]).filter(v=>v!=null);
+  const wAvg=wW.length?(wW.reduce((a,b)=>a+b,0)/wW.length).toFixed(1):null;
+  const pW=Array.from({length:7},(_,i)=>addDays(wStart,i-7)).map(d=>data.weights[toStr(d)]).filter(v=>v!=null);
+  const pAvg=pW.length?(pW.reduce((a,b)=>a+b,0)/pW.length).toFixed(1):null;
+  const diff=(wAvg&&pAvg)?(parseFloat(wAvg)-parseFloat(pAvg)).toFixed(1):null;
+  const gymMin=wDays.reduce((a,d)=>{const g=data.gymLogs[toStr(d)];const arr=Array.isArray(g)?g:(g?[g]:[]);return a+arr.reduce((s,l)=>s+(l.duration||0),0);},0);
+  const gymS=wDays.reduce((a,d)=>{const g=data.gymLogs[toStr(d)];const arr=Array.isArray(g)?g:(g?[g]:[]);return a+arr.length;},0);
+  const z2Min=wDays.reduce((a,d)=>{const c=data.cardioLogs[toStr(d)];return a+(c?.type==="zone2"?c.duration:0);},0);
+  const z2S=wDays.filter(d=>data.cardioLogs[toStr(d)]?.type==="zone2").length;
+  const hitMin=wDays.reduce((a,d)=>{const c=data.cardioLogs[toStr(d)];return a+(c?.type==="hit"?c.duration:0);},0);
+  const hitS=wDays.filter(d=>data.cardioLogs[toStr(d)]?.type==="hit").length;
+
+  return(
+    <div>
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12 }}>
+        <NavArrow dir="left" onClick={()=>setOffset(o=>o+1)}/>
+        <div style={{ fontSize:11,fontWeight:700 }}>{wL}</div>
+        <NavArrow dir="right" onClick={()=>setOffset(o=>Math.max(0,o-1))}/>
+      </div>
+      <Card label="WEEKLY ACTIVITY">
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:10 }}>
+          {wDays.map((d,i)=>{
+            const ds=toStr(d); const g=data.gymLogs[ds]; const hG=(Array.isArray(g)?g:(g?[g]:[])).length>0; const card=data.cardioLogs[ds]; const iT=ds===todayS;
+            return(<div key={i} style={{ textAlign:"center" }}>
+              <div style={{ fontSize:8,color:C.muted,marginBottom:3 }}>{DN[i]}</div>
+              <div style={{ background:iT?C.border:C.bg,border:`1px solid ${iT?C.text:C.border}`,borderRadius:4,padding:"6px 2px",minHeight:36,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2 }}>
+                {hG?<Dot color={C.blue}/>:null}{card?.type==="zone2"?<Dot color={C.green}/>:null}{card?.type==="hit"?<Dot color={C.red}/>:null}
+                {!hG&&!card?<Dot color={C.border}/>:null}
+              </div>
+            </div>);
+          })}
+        </div>
+        <div style={{ display:"flex",gap:10,fontSize:9,color:C.muted }}><span><Dot color={C.blue}/> Gym</span><span><Dot color={C.green}/> Zone 2</span><span><Dot color={C.red}/> HIT</span></div>
+      </Card>
+      <Card label="WEEKLY SUMMARY">
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12 }}>
+          <TimeBox label="GYM" minutes={gymMin} color={C.blue} extra={`${gymS} sessions`}/>
+          <TimeBox label="ZONE 2" minutes={z2Min} color={C.green} extra={`${z2S} sessions`}/>
+          <TimeBox label="HIT" minutes={hitMin} color={C.red} extra={`${hitS} sessions`}/>
+        </div>
+        {wAvg?(<div>
+          <div style={{ display:"flex",alignItems:"baseline",gap:8,marginBottom:10 }}>
+            <span style={{ fontSize:26,fontWeight:700 }}>{wAvg}</span><span style={{ fontSize:12,color:C.muted }}>kg avg</span>
+            {diff!=null?<span style={{ fontSize:12,fontWeight:700,color:parseFloat(diff)>0?C.red:C.green,marginLeft:"auto" }}>{parseFloat(diff)>0?"+":""}{diff} kg</span>:null}
+          </div>
+          <WChart days={wDays} weights={data.weights} height={60}/>
+        </div>):<p style={{color:C.muted,fontSize:11}}>No weight records this week</p>}
+      </Card>
+    </div>
+  );
+}
+
+function TabMonthly({ data }) {
+  const [vd,setVd]=useState(()=>new Date());
+  const yr=vd.getFullYear(),mo=vd.getMonth();
+  const fd=new Date(yr,mo,1),ld=new Date(yr,mo+1,0);
+  const sdow=(fd.getDay()+6)%7;
+  const cells=[]; for(let i=0;i<sdow;i++)cells.push(null); for(let d=1;d<=ld.getDate();d++)cells.push(new Date(yr,mo,d));
+  const mL=vd.toLocaleDateString("en-GB",{month:"long",year:"numeric"});
+  const todayS=todayStr();
+  const mD=Array.from({length:ld.getDate()},(_,i)=>new Date(yr,mo,i+1));
+  const gymMin=mD.reduce((a,d)=>{const g=data.gymLogs[toStr(d)];const arr=Array.isArray(g)?g:(g?[g]:[]);return a+arr.reduce((s,l)=>s+(l.duration||0),0);},0);
+  const gymS=mD.reduce((a,d)=>{const g=data.gymLogs[toStr(d)];const arr=Array.isArray(g)?g:(g?[g]:[]);return a+arr.length;},0);
+  const z2Min=mD.reduce((a,d)=>{const c=data.cardioLogs[toStr(d)];return a+(c?.type==="zone2"?c.duration:0);},0);
+  const z2S=mD.filter(d=>data.cardioLogs[toStr(d)]?.type==="zone2").length;
+  const hitMin=mD.reduce((a,d)=>{const c=data.cardioLogs[toStr(d)];return a+(c?.type==="hit"?c.duration:0);},0);
+  const hitS=mD.filter(d=>data.cardioLogs[toStr(d)]?.type==="hit").length;
+  const mW=mD.map(d=>data.weights[toStr(d)]).filter(v=>v!=null);
+  const mAvg=mW.length?(mW.reduce((a,b)=>a+b,0)/mW.length).toFixed(1):null;
+  const pmD=Array.from({length:new Date(yr,mo,0).getDate()},(_,i)=>new Date(yr,mo-1,i+1));
+  const pW=pmD.map(d=>data.weights[toStr(d)]).filter(v=>v!=null);
+  const pAvg=pW.length?(pW.reduce((a,b)=>a+b,0)/pW.length).toFixed(1):null;
+  const mDiff=(mAvg&&pAvg)?(parseFloat(mAvg)-parseFloat(pAvg)).toFixed(1):null;
+
+  return(
+    <div>
+      <Card>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+          <NavArrow dir="left" onClick={()=>setVd(new Date(yr,mo-1,1))}/>
+          <div style={{ fontWeight:700,fontSize:12,letterSpacing:1,textTransform:"uppercase" }}>{mL}</div>
+          <NavArrow dir="right" onClick={()=>setVd(new Date(yr,mo+1,1))}/>
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4 }}>
+          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=><div key={d} style={{ fontSize:8,color:C.muted,textAlign:"center" }}>{d}</div>)}
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3 }}>
+          {cells.map((d,i)=>{
+            if(!d) return (<div key={i}/>);
+            const ds=toStr(d);const g=data.gymLogs[ds];const hG=(Array.isArray(g)?g:(g?[g]:[])).length>0;const card=data.cardioLogs[ds];const iT=ds===todayS;
+            return(<div key={i} style={{ borderRadius:5,border:`1px solid ${iT?C.text:C.border}`,background:iT?"#e8e0d0":C.card,padding:"4px 2px",textAlign:"center",minHeight:36 }}>
+              <div style={{ fontSize:9,color:iT?C.text:C.muted,fontWeight:iT?700:400,marginBottom:2 }}>{d.getDate()}</div>
+              <div style={{ display:"flex",flexWrap:"wrap",justifyContent:"center",gap:2 }}>
+                {hG?<Dot color={C.blue}/>:null}{card?.type==="zone2"?<Dot color={C.green}/>:null}{card?.type==="hit"?<Dot color={C.red}/>:null}
+              </div>
+            </div>);
+          })}
+        </div>
+        <div style={{ display:"flex",gap:10,fontSize:9,color:C.muted,marginTop:8 }}><span><Dot color={C.blue}/> Gym</span><span><Dot color={C.green}/> Zone 2</span><span><Dot color={C.red}/> HIT</span></div>
+      </Card>
+      <Card label="MONTHLY SUMMARY">
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12 }}>
+          <TimeBox label="GYM" minutes={gymMin} color={C.blue} extra={`${gymS} sessions`}/>
+          <TimeBox label="ZONE 2" minutes={z2Min} color={C.green} extra={`${z2S} sessions`}/>
+          <TimeBox label="HIT" minutes={hitMin} color={C.red} extra={`${hitS} sessions`}/>
+        </div>
+        {mAvg&&(
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div><div style={{ fontSize:9,color:C.muted,marginBottom:2 }}>AVG WEIGHT</div><span style={{ fontSize:24,fontWeight:700 }}>{mAvg}</span><span style={{ fontSize:12,color:C.muted }}> kg</span></div>
+            {mDiff!=null?<div style={{ fontSize:13,fontWeight:700,color:parseFloat(mDiff)>0?C.red:C.green }}>{parseFloat(mDiff)>0?"+":""}{mDiff} kg</div>:null}
+          </div>
+        )}
+        {mW.length>1?<WChart days={mD} weights={data.weights} height={80}/>:null}
+      </Card>
+    </div>
+  );
+}
+
+function TabOverview({ data }) {
+  const [view,setView]=useState(null);
+  const back = (<div onClick={()=>setView(null)} style={{ fontSize:10,color:C.muted,cursor:"pointer",marginBottom:16,userSelect:"none" }}>‹ OVERVIEW</div>);
+  if (view==="weekly")  return (<div>{back}<TabWeekly  data={data}/></div>);
+  if (view==="monthly") return (<div>{back}<TabMonthly data={data}/></div>);
+  return(
+    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+      {[{id:"weekly",label:"WEEKLY",sub:"This week",color:C.blue},{id:"monthly",label:"MONTHLY",sub:"This month",color:C.green}].map(({id,label,sub,color})=>(
+        <div key={id} onClick={()=>setView(id)} style={{ background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"24px 16px",cursor:"pointer",textAlign:"center",userSelect:"none" }}>
+          <div style={{ fontSize:11,fontWeight:700,letterSpacing:2,color,marginBottom:6 }}>{label}</div>
+          <div style={{ fontSize:10,color:C.muted }}>{sub}</div>
+          <div style={{ fontSize:20,color:C.muted,marginTop:12 }}>›</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
